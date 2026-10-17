@@ -1,148 +1,156 @@
 # Docker VHDX Auto-Compact (Windows + Docker Desktop)
 
-A small PowerShell setup for scheduling Docker Desktop's WSL2 virtual disk maintenance and recording each run to CSV and TXT logs.
+A PowerShell setup for scheduling Docker Desktop's WSL2 virtual-disk compaction and recording each run to CSV and TXT logs.
 
-> **Important:** This repository is intended for Windows machines using Docker Desktop with the WSL2 backend. Review the scripts before running them, especially if you use a non-default Docker data location.
+> **Important:** This setup is intended for Windows 10/11 with Docker Desktop using the WSL2 backend. Review `docker-compact.ps1` before running it. Compaction may stop Docker Desktop/WSL and interrupt running containers.
 
 ## What it does
 
-- Registers a Windows Scheduled Task named `DockerCompact`.
-- Runs every **Sunday at 03:00 AM**.
-- Runs the existing compaction script (`docker-compact.ps1`) through a logging wrapper.
-- Automatically creates `C:\Scripts\logs\` when the wrapper runs.
-- Records the VHDX size and free space on `C:` before and after each run, duration, exit status, and captured output.
+- Creates or updates a Windows Scheduled Task named `DockerCompact`.
+- Schedules it for every **Sunday at 03:00 AM**.
+- Uses one setup script, `DockerCompact-AutoSetup.ps1`, for both task registration and logged execution.
+- Runs the existing `docker-compact.ps1` script when the task starts.
+- Logs each run's start/end time, duration, status, exit code, VHDX size, and free space on drive `C:`.
+- Creates the log directory automatically.
 
-Default log files:
+Log files:
 
-- `C:\Scripts\logs\docker-compact-history.csv` — one summary row per run.
-- `C:\Scripts\logs\docker-compact.log` — timestamped run details and output.
+- `C:\Scripts\logs\docker-compact-history.csv` — one summary row per run; can be opened in Excel.
+- `C:\Scripts\logs\docker-compact.log` — detailed timestamped output and errors.
 
 ## Repository layout
 
-Keep these files together in `C:\Scripts\`:
+Place these files in `C:\Scripts\`:
 
 ```text
 C:\Scripts\
+├── DockerCompact-AutoSetup.ps1
 ├── docker-compact.ps1
-├── docker-compact-logged.ps1
-└── Update-DockerCompactTask-Logging.ps1
+└── logs\
+    ├── docker-compact-history.csv   # created automatically
+    └── docker-compact.log           # created automatically
 ```
 
-- `docker-compact.ps1` — the actual compaction script.
-- `docker-compact-logged.ps1` — runs the compaction script and writes logs.
-- `Update-DockerCompactTask-Logging.ps1` — updates the existing scheduled task to use the logging wrapper.
+- `DockerCompact-AutoSetup.ps1` — creates/updates the scheduled task and runs the logging workflow when invoked by Task Scheduler.
+- `docker-compact.ps1` — the existing script that performs the actual compaction.
+- `logs\` — created automatically; no need to create it manually.
 
-**Make sure `docker-compact.ps1` is included in the repository** if you want a fresh clone to work without manually copying another file. Do not commit machine-specific secrets or credentials.
+The unified setup script expects the compaction script at `C:\Scripts\docker-compact.ps1`. It must itself be saved at `C:\Scripts\DockerCompact-AutoSetup.ps1` because the scheduled task uses that fixed path.
 
 ## Requirements
 
 - Windows 10/11.
 - Docker Desktop configured to use the WSL2 backend.
 - PowerShell.
-- Permission to create/update a Scheduled Task (run setup from an elevated PowerShell window).
-- The Docker VHDX file is at the default location:
-  `%LOCALAPPDATA%\Docker\wsl\disk\docker_data.vhdx`
+- Administrator permission to register/update the scheduled task.
+- Docker VHDX at the default location: `%LOCALAPPDATA%\Docker\wsl\disk\docker_data.vhdx`.
 
-If a machine uses a different VHDX path, review and update the scripts before running them.
+If your Docker VHDX is stored elsewhere, review and update the setup script before running it.
 
-## Install on another computer
+## Install / set up
 
-### 1. Clone the repository
+### 1. Put the files in place
 
-Open PowerShell:
+Copy `DockerCompact-AutoSetup.ps1` and your existing `docker-compact.ps1` into `C:\Scripts\`.
 
-```powershell
-git clone <YOUR_REPOSITORY_URL> C:\Scripts
-Set-Location C:\Scripts
-```
+If `C:\Scripts\` already contains files, do not overwrite them blindly. Back up anything you need first.
 
-Replace `<YOUR_REPOSITORY_URL>` with the HTTPS or SSH URL of your GitHub repository.
+### 2. Register the scheduled task (one-time setup)
 
-If `C:\Scripts` already exists and contains files, clone into a different directory or back up the existing files first.
-
-### 2. Review the scripts
-
-Read `docker-compact.ps1`, `docker-compact-logged.ps1`, and `Update-DockerCompactTask-Logging.ps1` before running them. Confirm that the VHDX path and scheduled-task settings match the target computer.
-
-### 3. Register the scheduled task
-
-If your repository includes a registration script named `Register-DockerCompactTask.ps1`, open **PowerShell as Administrator** and run:
+Open **PowerShell as Administrator** and run this one-line command:
 
 ```powershell
 Set-ExecutionPolicy -Scope Process Bypass -Force; & "C:\Scripts\DockerCompact-AutoSetup.ps1"
 ```
 
-This creates or registers the `DockerCompact` task for Sundays at 03:00 AM.
+The script creates or updates `DockerCompact` to run every Sunday at 03:00 AM. You do not need to run a separate registration script or logging updater.
 
-If the repository does **not** include `Register-DockerCompactTask.ps1`, add it to the repository or register the task using your existing setup script before continuing.
-
-### 4. Enable logging for the scheduled task
-
-In the same elevated PowerShell window, run:
+Verify the task exists:
 
 ```powershell
-Set-ExecutionPolicy -Scope Process Bypass
-& "C:\Scripts\Update-DockerCompactTask-Logging.ps1"
+Get-ScheduledTask -TaskName "DockerCompact"
 ```
 
-This updates the existing `DockerCompact` task's action to run `docker-compact-logged.ps1`. It is intended to preserve the task's existing trigger and principal.
+Check the next/last run information:
 
-> Run the registration step first on a new machine, then run the logging update step.
+```powershell
+Get-ScheduledTaskInfo -TaskName "DockerCompact" | Format-List LastRunTime, LastTaskResult, NextRunTime, NumberOfMissedRuns
+```
 
-### 5. Test the task
+## View logs without opening the CSV
 
-Start the task immediately:
+### Show the latest detailed log lines
+
+```powershell
+Get-Content "C:\Scripts\logs\docker-compact.log" -Tail 30
+```
+
+### Follow the log live
+
+```powershell
+Get-Content "C:\Scripts\logs\docker-compact.log" -Tail 20 -Wait
+```
+
+Press `Ctrl+C` to stop following the log.
+
+### Show only the most recent CSV summary row
+
+```powershell
+Import-Csv "C:\Scripts\logs\docker-compact-history.csv" | Select-Object -Last 1 | Format-List StartTime, EndTime, DurationSeconds, Status, ExitCode, VhdxLogicalBeforeGiB, VhdxLogicalAfterGiB, VhdxAllocatedBeforeGiB, VhdxAllocatedAfterGiB, CFreeBeforeGiB, CFreeAfterGiB, Error
+```
+
+### Show all CSV runs as a table
+
+```powershell
+Import-Csv "C:\Scripts\logs\docker-compact-history.csv" | Format-Table StartTime, DurationSeconds, Status, VhdxLogicalBeforeGiB, VhdxLogicalAfterGiB, CFreeBeforeGiB, CFreeAfterGiB -AutoSize
+```
+
+### Open the logs in Notepad
+
+```powershell
+notepad "C:\Scripts\logs\docker-compact.log"
+```
+
+```powershell
+notepad "C:\Scripts\logs\docker-compact-history.csv"
+```
+
+The CSV can also be opened in Excel.
+
+## Test the task manually
+
+> **Warning:** Starting this task performs real compaction and may stop Docker Desktop/WSL and interrupt running containers. Save your work and run it only when it is safe to stop Docker.
+
+Start the task:
 
 ```powershell
 Start-ScheduledTask -TaskName "DockerCompact"
 ```
 
-Wait for it to finish, then inspect its status:
+Check its status:
 
 ```powershell
-Get-ScheduledTaskInfo -TaskName "DockerCompact" |
-    Select-Object LastRunTime, LastTaskResult, NextRunTime
+Get-ScheduledTaskInfo -TaskName "DockerCompact" | Format-List LastRunTime, LastTaskResult, NextRunTime, NumberOfMissedRuns
 ```
 
-Check the logs:
+Review the detailed log:
 
 ```powershell
 Get-Content "C:\Scripts\logs\docker-compact.log" -Tail 80
-Import-Csv "C:\Scripts\logs\docker-compact-history.csv" |
-    Format-Table -AutoSize
-```
-
-The `logs` directory and log files are created automatically when the logging wrapper runs; you do not need to create them manually.
-
-## Run the compaction manually
-
-To run the original compaction script directly:
-
-```powershell
-Set-ExecutionPolicy -Scope Process Bypass
-& "C:\Scripts\docker-compact.ps1"
-```
-
-To run it with logging, use:
-
-```powershell
-Set-ExecutionPolicy -Scope Process Bypass
-& "C:\Scripts\docker-compact-logged.ps1"
 ```
 
 ## Check or manage the scheduled task
 
-Check the task:
+Check the task definition:
 
 ```powershell
-Get-ScheduledTask -TaskName "DockerCompact"
-Get-ScheduledTaskInfo -TaskName "DockerCompact"
+Get-ScheduledTask -TaskName "DockerCompact" | Format-List TaskName, TaskPath, State
 ```
 
-Run it now:
+Check run information:
 
 ```powershell
-Start-ScheduledTask -TaskName "DockerCompact"
+Get-ScheduledTaskInfo -TaskName "DockerCompact" | Format-List LastRunTime, LastTaskResult, NextRunTime, NumberOfMissedRuns
 ```
 
 Disable it:
@@ -157,41 +165,60 @@ Enable it again:
 Enable-ScheduledTask -TaskName "DockerCompact"
 ```
 
-Remove it:
+Remove it (Windows asks for confirmation):
 
 ```powershell
 Unregister-ScheduledTask -TaskName "DockerCompact" -Confirm
 ```
 
+## Task Scheduler GUI
+
+1. Press `Win+R`, enter `taskschd.msc`, and press Enter.
+2. Select **Task Scheduler Library**.
+3. Select `DockerCompact`.
+4. Review **Last Run Time**, **Last Run Result**, **Next Run Time**, and the **History** tab.
+5. If History is empty, select **Enable All Tasks History** in the Actions pane.
+
+Task Scheduler history shows whether Windows started the task and how it ended. The CSV/TXT logs contain the compaction measurements and script output.
+
 ## Important notes
 
-- The task is configured to run as the Windows account used during registration. On another computer, register it under the account that should own and run the task.
-- If the task uses an **Interactive** logon type, the user generally needs to be signed in for it to run. A task scheduled for 03:00 AM may not run while the account is signed out. The task's `StartWhenAvailable` setting can allow a missed run to start later, subject to Windows Task Scheduler behavior.
-- Compaction may require Docker Desktop/WSL to be stopped. Review the original script to understand what it stops and whether it could interrupt running containers or development work.
-- Do not assume that a successful PowerShell process exit guarantees the VHDX shrank. Compare the before/after values in the CSV log.
-- The wrapper treats exit code `0` from the original script as success. If the original script catches an error but exits with code `0`, the recorded status may be misleading; the original script should return a non-zero exit code on failure.
-- The VHDX **logical size** (`Length`) is not necessarily the same as the physical space it occupies on the host drive. The log may also include `Get-VHD` values when that command is available.
-- Test the setup manually on each machine before relying on the weekly schedule.
+- The task runs under the Windows account used when registering it, with the highest run level. Its Interactive logon type generally requires that account to be signed in; `StartWhenAvailable` may allow a missed run to start later, subject to Task Scheduler behavior.
+- `LastTaskResult = 0` means Windows recorded a zero exit code; it does not prove that the VHDX shrank.
+- The setup script records success based on the exit code of `docker-compact.ps1`. If that script catches an error but still exits with code `0`, the logged status may be misleading.
+- VHDX logical file size (`Length`) is not the same as physical space occupied on the host drive. Allocated/virtual-size values are recorded only if `Get-VHD` is available.
+- Compare before/after values in the CSV to see whether free space on `C:` increased. A successful run does not guarantee a particular amount of reclaimed space.
+- Test the setup manually before relying on the weekly schedule.
 
 ## Troubleshooting
 
 ### The task does not exist
 
-Run the task registration script from an elevated PowerShell window first.
+Confirm the setup script is at `C:\Scripts\DockerCompact-AutoSetup.ps1`, then run PowerShell as Administrator and execute:
 
-### The logs are not appearing
-
-Check that the scheduled task points to:
-
-```text
-C:\Scripts\docker-compact-logged.ps1
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass -Force; & "C:\Scripts\DockerCompact-AutoSetup.ps1"
 ```
 
-Then start the task manually and inspect the Task Scheduler result and any PowerShell error output. Confirm the wrapper and original script are present.
+If registration fails, read the error printed in PowerShell.
+
+### The log files do not exist
+
+The log files are created when the scheduled task runs. First check that the task exists, then start it manually when it is safe to stop Docker:
+
+```powershell
+Start-ScheduledTask -TaskName "DockerCompact"
+```
+
+Then inspect the log:
+
+```powershell
+Get-Content "C:\Scripts\logs\docker-compact.log" -Tail 80
+```
 
 ### The task runs but no space is reclaimed
 
-Check the CSV's before/after sizes and free-space values. Sparse VHD behavior, Docker/WSL state, deleted data, and Windows storage behavior can all affect whether host free space changes. A successful run does not guarantee a particular amount of reclaimed space.
+Compare the CSV's before/after values. Sparse VHD behavior, Docker/WSL state, deleted data, and Windows storage behavior can all affect whether host free space changes.
 
 ---
 
