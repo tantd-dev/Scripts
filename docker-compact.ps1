@@ -176,7 +176,7 @@ try {
 
     $attachOutput = Invoke-DiskPart @(
         "select vdisk file=`"$vhd`"",
-        "attach vdisk",
+        "attach vdisk readonly",
         "exit"
     )
 
