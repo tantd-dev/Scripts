@@ -69,8 +69,7 @@ Read `docker-compact.ps1`, `docker-compact-logged.ps1`, and `Update-DockerCompac
 If your repository includes a registration script named `Register-DockerCompactTask.ps1`, open **PowerShell as Administrator** and run:
 
 ```powershell
-Set-ExecutionPolicy -Scope Process Bypass
-& "C:\Scripts\Register-DockerCompactTask.ps1"
+Set-ExecutionPolicy -Scope Process Bypass -Force; & "C:\Scripts\DockerCompact-AutoSetup.ps1"
 ```
 
 This creates or registers the `DockerCompact` task for Sundays at 03:00 AM.
