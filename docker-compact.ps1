@@ -24,7 +24,9 @@ function Test-IsAdministrator {
 function Invoke-DiskPart {
     param(
         [Parameter(Mandatory = $true)]
-        [string[]]$Commands
+        [string[]]$Commands,
+
+        [switch]$AllowAlreadyDetached
     )
 
     $scriptFile = New-TemporaryFile
@@ -38,8 +40,19 @@ function Invoke-DiskPart {
         )
 
         $exitCode = $LASTEXITCODE
+        $text = $output -join "`n"
 
         $output | ForEach-Object { Write-Host $_ }
+
+        # DiskPart can return a non-zero code when detaching an
+        # already-detached VHDX. Accept only this specific condition
+        # when the caller explicitly allows it.
+        if (
+            $AllowAlreadyDetached -and
+            $text -match "(?i)already detached"
+        ) {
+            return ,$output
+        }
 
         if ($exitCode -ne 0) {
             throw "DiskPart exited with code $exitCode."
@@ -54,11 +67,13 @@ function Invoke-DiskPart {
 }
 
 function Detach-DockerVhdx {
-    $output = Invoke-DiskPart @(
-        "select vdisk file=`"$vhd`"",
-        "detach vdisk",
-        "exit"
-    )
+    $output = Invoke-DiskPart `
+        -Commands @(
+            "select vdisk file=`"$vhd`"",
+            "detach vdisk",
+            "exit"
+        ) `
+        -AllowAlreadyDetached
 
     $text = $output -join "`n"
 
@@ -67,8 +82,8 @@ function Detach-DockerVhdx {
         return
     }
 
-    if ($text -match "(?i)(already detached|not attached|is not attached)") {
-        Write-Host "VHDX is already detached." -ForegroundColor DarkGray
+    if ($text -match "(?i)already detached") {
+        Write-Host "VHDX is already detached; continuing." -ForegroundColor DarkGray
         return
     }
 
